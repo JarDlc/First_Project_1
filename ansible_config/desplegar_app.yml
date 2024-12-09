@@ -1,0 +1,67 @@
+- name: Desplegar Podinfo en Kubernetes
+  hosts: kubernetes-master
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  vars_files:
+    - vault.yml
+  
+  become: yes  # Necesario para ejecutar como superusuario
+
+  tasks:
+    - name: Asegurar que pip3 está instalado
+      apt:
+        name: python3-pip
+        state: present
+        update_cache: yes
+
+    - name: Instalar módulo de Python para Kubernetes
+      pip:
+        name: kubernetes
+        state: present
+        executable: pip3
+
+    - name: Desplegar el Deployment de Podinfo
+      k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: podinfo
+            namespace: default  # Se asegura de especificar el namespace
+            labels:
+              app: podinfo
+          spec:
+            replicas: 2
+            selector:
+              matchLabels:
+                app: podinfo
+            template:
+              metadata:
+                labels:
+                  app: podinfo
+              spec:
+                containers:
+                - name: podinfo
+                  image: ghcr.io/stefanprodan/podinfo:latest
+                  ports:
+                  - containerPort: 9898
+
+    - name: Desplegar el Service de Podinfo
+      k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: podinfo
+            namespace: default  # Se asegura de especificar el namespace
+          spec:
+            selector:
+              app: podinfo
+            ports:
+              - protocol: TCP
+                port: 80
+                targetPort: 9898
+                nodePort: 30080
+            type: NodePort

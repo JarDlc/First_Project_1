@@ -1,0 +1,73 @@
+---
+- name: Instalar y configurar Kubernetes en los nodos
+  hosts: all
+ # Necesario para usar el vault de contraseñas.
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  vars_files:
+    - vault.yml
+  ##################################################
+  become: yes  # Necesario para ejecutar como superusuario
+  tasks:
+    - name: Instalar dependencias necesarias
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gpg
+        state: present
+        update_cache: yes
+
+    - name: Añadir la clave GPG para el repositorio de Kubernetes
+      shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      become: yes
+
+    - name: Añadir el repositorio de Kubernetes a la lista de fuentes APT
+      shell: |
+        echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.31/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
+      become: yes
+
+    - name: Actualizar la lista de paquetes
+      apt:
+        update_cache: yes
+
+    - name: Instalar kubelet, kubeadm y kubectl
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+
+    - name: Marcar kubelet, kubeadm y kubectl para evitar actualizaciones automáticas
+      command: apt-mark hold kubelet kubeadm kubectl
+      become: true
+
+    - name: Instalar containerd
+      apt:
+        name: containerd
+        state: present
+
+    - name: Verificar el proceso containerd (opcional)
+      shell: ps -p 1
+      register: containerd_ps_output
+      ignore_errors: yes
+
+    - name: Crear directorio para la configuración de containerd
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    - name: Configurar containerd
+      shell: |
+        containerd config default | sed 's/SystemdCgroup = false/SystemdCgroup = true/' | tee /etc/containerd/config.toml
+      become: yes
+
+    - name: Reiniciar el servicio de containerd
+      systemd:
+        name: containerd
+        state: restarted
+

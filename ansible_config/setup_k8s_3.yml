@@ -1,0 +1,59 @@
+- name: Configurar nodo maestro de Kubernetes
+  hosts: kubernetes-master
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+  vars_files:
+    - vault.yml
+  become: yes
+  vars:
+    pod_network_cidr: "10.244.0.0/16"
+  tasks:
+    - name: Obtener la IP privada del nodo
+      command: hostname -I
+      register: ip_output
+
+    - name: Extraer la primera IP privada
+      set_fact:
+        private_ip: "{{ ip_output.stdout.split()[0] }}"
+
+    - name: Inicializar el clúster con kubeadm
+      command: >
+        kubeadm init
+        --apiserver-advertise-address {{ private_ip }}
+        --pod-network-cidr "{{ pod_network_cidr }}"
+        --upload-certs
+      args:
+        creates: /etc/kubernetes/admin.conf  # Para que no se vuelva a ejecutar si ya está inicializado
+
+    - name: Crear directorio de configuración para kubectl
+      file:
+        path: "{{ ansible_env.HOME }}/.kube"
+        state: directory
+        mode: "0755"
+
+    - name: Copiar el archivo de configuración de Kubernetes
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ ansible_env.HOME }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ansible_user_id }}"
+        group: "{{ ansible_user_id }}"
+        mode: "0644"
+
+    - name: Verificar configuración del nodo maestro
+      shell: kubectl get nodes
+      register: kubectl_output
+      ignore_errors: yes
+
+    - debug:
+        var: kubectl_output.stdout
+
+    - name: Desplegar Flannel en el Kubernetes Master
+      command: kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      register: flannel_apply
+      ignore_errors: yes  # Si ocurre un error, no detendremos el playbook
+
+    - name: Verificar si Flannel fue aplicado correctamente
+      debug:
+        msg: "Flannel aplicado correctamente."
+      when: flannel_apply.rc == 0
